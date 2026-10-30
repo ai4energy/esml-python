@@ -41,8 +41,9 @@ pip install git+https://github.com/ai4energy/esml-python
 | `simulate(path, tspan=(0.0, 1.0), steps=100, observe=None, *, …)` | 一次性时间积分 → `SimulateOutput(t, series, steps, system, raw, units, meta)` |
 
 `units` 是路径 → SI 量纲表达式的映射（模型未声明单位时缺项）；`meta` 含
-`engineVersion`、`docHash`（源文件 SHA-256）、`durationMs`、`converged` 与
-`unitCoverage`。字段语义见[结果契约](https://docs.ai4energy.cn/esml/results)。
+`engineVersion`、`docHash`（源文件 SHA-256）、`durationMs`、`converged`、
+`iterations`、`residual`、`residualTolerance` 与 `unitCoverage`。字段语义见
+[结果契约](https://docs.ai4energy.cn/esml/results)。
 
 `observe` 只接受变量路径；空列表在客户端拒绝，未知/重复路径由引擎拒绝。
 
@@ -55,7 +56,11 @@ pip install git+https://github.com/ai4energy/esml-python
 | `set_param` / `set_params` / `set_state` / `set_states` / `clear_state` | 热参数与状态注入 |
 | `snapshot()` / `restore(snapshot)` / `info()` / `close()` | 快照恢复、状态与生命周期 |
 
-错误类型：`EsmlError`（引擎报错，含 `.op` / `.raw`）、`EsmlProtocolError`
+`Session.solve()` 返回 `SolveResult(values, …, units, meta)`；`simulate` /
+`predict` 返回 `Trajectory(…, units, meta)`；字段与一次性契约一致。
+
+错误类型：`EsmlError`（引擎报错，含 `.op` / `.raw`，以及 `esml.error/v1`
+的 `.code` / `.hint` / `.doc_hash`）、`EsmlProtocolError`
 （非 `esml.*/v1` 信封）、`EsmlTimeout`、`EsmlClosed`、`EsmlBinaryNotFound`。
 
 ## 许可

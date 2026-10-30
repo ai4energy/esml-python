@@ -38,6 +38,16 @@ def test_open_reports_the_document(session):
     assert session.unknowns >= 1
 
 
+def test_session_solve_carries_meta(session):
+    out = session.solve()
+    assert out.meta["converged"] is True
+    assert out.meta["engineVersion"]
+    assert isinstance(out.meta["docHash"], str)
+    assert out.units == {}
+    assert out.iterations is not None
+    assert out.meta["residual"] <= out.meta["residualTolerance"]
+
+
 def test_simulate_matches_the_analytic_decay(session):
     traj = session.simulate((0.0, 1.0), steps=20, observe=["m.x"])
     assert traj.points == 21
@@ -47,6 +57,9 @@ def test_simulate_matches_the_analytic_decay(session):
     assert traj.continued is False
     assert traj.doc_hash is not None
     assert traj.duration_ms is not None
+    assert traj.meta["engineVersion"]
+    assert isinstance(traj.meta["docHash"], str)
+    assert traj.units == {}
 
 
 def test_hot_parameter_update_changes_the_trajectory(session):
@@ -80,6 +93,26 @@ def test_predict_does_not_commit(session):
     assert chained.series["m.x"][0] == pytest.approx(first.series["m.x"][-1], rel=1e-6)
 
 
+def test_oneshot_error_contract():
+    with pytest.raises(EsmlError) as exc:
+        solve_oneshot("/tmp/esml-missing-for-client.esml")
+    assert exc.value.code == "io.read"
+    assert exc.value.hint
+    assert exc.value.doc_hash is None
+
+    bad = DATA.read_text().replace("Der(x) = -lam * x", "Der(x) = 1")
+    path = DATA.parent / "no-steady.tmp.esml"
+    try:
+        path.write_text(bad)
+        with pytest.raises(EsmlError) as exc:
+            solve_oneshot(path, system="S", binary=BIN)
+        assert exc.value.code == "solve.failed"
+        assert isinstance(exc.value.doc_hash, str)
+        assert len(exc.value.doc_hash) == 64
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def test_oneshot_solve_and_simulate():
     steady = solve_oneshot(DATA, system="S", binary=BIN)
     assert steady.values["m.x"] == pytest.approx(0.0, abs=1e-8)
@@ -90,6 +123,8 @@ def test_oneshot_solve_and_simulate():
     assert steady.meta["engineVersion"]
     assert steady.meta["unitCoverage"]["total"] == 1
     assert steady.meta["unitCoverage"]["complete"] is False
+    assert steady.meta["iterations"] >= 1
+    assert steady.meta["residual"] <= steady.meta["residualTolerance"]
     assert steady.units == {}
 
     traj = simulate_oneshot(DATA, (0.0, 1.0), 20, observe=["m.x"], system="S", binary=BIN)

@@ -130,10 +130,33 @@ def _run(args: list, api: str, timeout: Optional[float], op: str) -> dict:
     except subprocess.TimeoutExpired:
         raise EsmlTimeout(f"`esml {op}` did not finish within {timeout}s", op=op) from None
     if proc.returncode != 0:
+        raw: dict = {"returncode": proc.returncode}
         message = (proc.stderr or proc.stdout or "").strip()
+        code = hint = doc_hash = None
+        lines = message.splitlines()
+        if lines:
+            try:
+                err_env = json.loads(lines[-1])
+            except json.JSONDecodeError:
+                err_env = None
+            if isinstance(err_env, dict) and err_env.get("apiVersion") == "esml.error/v1":
+                raw["error"] = err_env
+                code = err_env.get("code")
+                hint = err_env.get("hint")
+                doc_hash = err_env.get("docHash")
+                message = "\n".join(lines[:-1]).strip()
+        if message.startswith("error: "):
+            message = message[len("error: "):]
         if not message:
             message = f"`esml {op}` exited with code {proc.returncode}"
-        raise EsmlError(message, op=op, raw={"returncode": proc.returncode})
+        raise EsmlError(
+            message,
+            op=op,
+            raw=raw,
+            code=code,
+            hint=hint,
+            doc_hash=doc_hash,
+        )
     try:
         env = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:

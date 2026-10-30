@@ -13,11 +13,19 @@ class EsmlError(Exception):
     """An error reported by the ESML engine (or by the client before sending)."""
 
     def __init__(self, message: str, *, op: str | None = None,
-                 request: str | None = None, raw: dict | None = None) -> None:
+                 request: str | None = None, raw: dict | None = None,
+                 code: str | None = None, hint: str | None = None,
+                 doc_hash: str | None = None) -> None:
         super().__init__(message)
         self.op = op
         self.request = request
         self.raw = raw
+        #: Stable machine code from `esml.error/v1` (``None`` for client errors).
+        self.code = code
+        #: Actionable suggestion supplied by the engine, if any.
+        self.hint = hint
+        #: SHA-256 of the source document (one-shot errors), if available.
+        self.doc_hash = doc_hash
 
 
 class EsmlBinaryNotFound(EsmlError):

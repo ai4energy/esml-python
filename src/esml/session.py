@@ -20,7 +20,7 @@ import os
 import queue
 import subprocess
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .binary import engine_version, find_binary
@@ -40,6 +40,8 @@ class SolveResult:
     duration_ms: Optional[int]
     doc_hash: Optional[int]
     raw: dict
+    units: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -54,6 +56,8 @@ class Trajectory:
     duration_ms: Optional[int]
     doc_hash: Optional[int]
     raw: dict
+    units: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -71,6 +75,8 @@ class Info:
     sim_calls: Optional[int]
     last_steps: Optional[int]
     raw: dict
+    source_hash: Optional[str] = None
+    engine_version: Optional[str] = None
 
 
 class Session:
@@ -140,6 +146,8 @@ class Session:
                 op="open",
                 request=open_env.get("request"),
                 raw=open_env,
+                code=open_env.get("code"),
+                hint=open_env.get("hint"),
             )
         if open_env.get("op") != "open":
             self._kill()
@@ -148,6 +156,7 @@ class Session:
             )
         self.open_envelope = open_env
         self.doc_hash = open_env.get("docHash")
+        self.source_hash = open_env.get("sourceHash")
         self.system = open_env.get("system")
         self.unknowns = open_env.get("unknowns")
         self.dynamic = open_env.get("dynamic")
@@ -205,6 +214,8 @@ class Session:
             duration_ms=env.get("durationMs"),
             doc_hash=env.get("docHash"),
             raw=env,
+            units=dict(env.get("units") or {}),
+            meta=dict(env.get("meta") or {}),
         )
 
     def simulate(
@@ -282,6 +293,8 @@ class Session:
             sim_calls=env.get("simCalls"),
             last_steps=env.get("lastSteps"),
             raw=env,
+            source_hash=env.get("sourceHash"),
+            engine_version=env.get("engineVersion"),
         )
 
     # ── internals ──────────────────────────────────────────────────────────
@@ -318,6 +331,8 @@ class Session:
             duration_ms=env.get("durationMs"),
             doc_hash=env.get("docHash"),
             raw=env,
+            units=dict(env.get("units") or {}),
+            meta=dict(env.get("meta") or {}),
         )
 
     def _write(self, payload: dict) -> None:
@@ -348,6 +363,9 @@ class Session:
                     op=op,
                     request=env.get("request"),
                     raw=env,
+                    code=env.get("code"),
+                    hint=env.get("hint"),
+                    doc_hash=self.source_hash,
                 )
             return env
 
