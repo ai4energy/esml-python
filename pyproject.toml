@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "esml"
+version = "0.1.0"
+description = "MIT Python client for the ESML engine: one-shot solve/simulate over the engine CLI"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE", "LICENSE-ENGINE.md"]
+authors = [{ name = "Mingtao Li", email = "mingtao.li@gmail.com" }]
+keywords = [
+  "esml",
+  "modeling",
+  "simulation",
+  "digital-twin",
+  "dtl",
+  "mpc",
+  "process-simulation",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.urls]
+Homepage = "https://github.com/ai4energy/esml-python"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

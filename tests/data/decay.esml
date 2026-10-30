@@ -1,0 +1,10 @@
+<!-- Example for the ESML Python client (MIT). Der(x) = -lam * x. -->
+<esml xmlns="https://www.ai4energy.cn/esml/v1" name="Decay">
+  <variableTypes><type name="real" unit="1" default="0"/></variableTypes>
+  <modelTypes><modelType name="Decay">
+    <parameters><parameter name="lam" type="real" default="0.5"/></parameters>
+    <variables><variable name="x" type="real" role="state" initial="1.0"/></variables>
+    <equations><equation>Der(x) = -lam * x</equation></equations>
+  </modelType></modelTypes>
+  <systems><system name="S"><instances><instance name="m" type="Decay"/></instances></system></systems>
+</esml>
