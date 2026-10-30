@@ -45,6 +45,8 @@ def test_simulate_matches_the_analytic_decay(session):
     assert traj.series["m.x"][0] == pytest.approx(1.0, rel=1e-6)
     assert traj.series["m.x"][-1] == pytest.approx(math.exp(-0.5), rel=2e-3)
     assert traj.continued is False
+    assert traj.doc_hash is not None
+    assert traj.duration_ms is not None
 
 
 def test_hot_parameter_update_changes_the_trajectory(session):
@@ -82,12 +84,24 @@ def test_oneshot_solve_and_simulate():
     steady = solve_oneshot(DATA, system="S", binary=BIN)
     assert steady.values["m.x"] == pytest.approx(0.0, abs=1e-8)
     assert steady.unknowns == 1
+    assert steady.meta["converged"] is True
+    assert isinstance(steady.meta["docHash"], str)
+    assert len(steady.meta["docHash"]) == 64
+    assert steady.meta["engineVersion"]
+    assert steady.meta["unitCoverage"]["total"] == 1
+    assert steady.meta["unitCoverage"]["complete"] is False
+    assert steady.units == {}
 
     traj = simulate_oneshot(DATA, (0.0, 1.0), 20, observe=["m.x"], system="S", binary=BIN)
     assert traj.steps == 20
     assert list(traj.series) == ["m.x"]
     assert traj.series["m.x"][0] == pytest.approx(1.0, rel=1e-6)
     assert traj.series["m.x"][-1] == pytest.approx(math.exp(-0.5), rel=2e-3)
+    assert traj.meta["engineVersion"]
+    assert isinstance(traj.meta["docHash"], str)
+    assert len(traj.meta["docHash"]) == 64
+    assert traj.meta["unitCoverage"]["complete"] is False
+    assert traj.units == {}
 
 
 def test_snapshot_restores_into_a_fresh_session(session):

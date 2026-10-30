@@ -13,7 +13,7 @@ import json
 import math
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
 from .binary import find_binary
@@ -28,6 +28,8 @@ class SolveOutput:
     unknowns: Optional[int]
     system: Optional[str]
     raw: dict
+    units: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -39,6 +41,8 @@ class SimulateOutput:
     steps: int
     system: Optional[str]
     raw: dict
+    units: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)
 
 
 def solve(
@@ -53,10 +57,21 @@ def solve(
     args = _base_args("solve", path, system, libraries, binary)
     args.append("--json")
     env = _run(args, "esml.solve/v1", timeout, "solve")
-    values = {}
-    for row in env.get("values", []):
-        values[str(row["path"])] = float(row["value"])
-    return SolveOutput(values, env.get("unknowns"), env.get("system"), env)
+    rows = env.get("values", [])
+    values = {str(row["path"]): float(row["value"]) for row in rows}
+    units = {
+        str(row["path"]): str(row["unit"])
+        for row in rows
+        if row.get("unit") is not None
+    }
+    return SolveOutput(
+        values,
+        env.get("unknowns"),
+        env.get("system"),
+        env,
+        units=units,
+        meta=dict(env.get("meta") or {}),
+    )
 
 
 def simulate(
@@ -86,8 +101,16 @@ def simulate(
     series = {
         col: [float(row[i]) for row in rows] for i, col in enumerate(columns)
     }
-    return SimulateOutput(list(env.get("t", [])), series, int(env.get("steps", 0)),
-                          env.get("system"), env)
+    units = {str(k): str(v) for k, v in (env.get("units") or {}).items()}
+    return SimulateOutput(
+        list(env.get("t", [])),
+        series,
+        int(env.get("steps", 0)),
+        env.get("system"),
+        env,
+        units=units,
+        meta=dict(env.get("meta") or {}),
+    )
 
 
 def _base_args(op, path, system, libraries, binary) -> list:
