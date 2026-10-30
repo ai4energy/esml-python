@@ -45,6 +45,11 @@ pip install git+https://github.com/ai4energy/esml-python
 `iterations`、`residual`、`residualTolerance` 与 `unitCoverage`。字段语义见
 [结果契约](https://docs.ai4energy.cn/esml/results)。
 
+引擎版本：`units` / `meta` 需引擎 **>= 1.8.1**；`iterations` / `residual` /
+`EsmlError.code` 需引擎 **>= 1.9.0**。旧引擎缺少的字段会表现为空的 `meta` /
+`units` 或 `None`，客户端不伪造。
+
+
 `observe` 只接受变量路径；空列表在客户端拒绝，未知/重复路径由引擎拒绝。
 
 商业版常驻会话（DTIL）：
