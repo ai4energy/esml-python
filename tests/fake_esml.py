@@ -30,6 +30,7 @@ import json
 import math
 import os
 import re
+import select
 import sys
 import time
 
@@ -369,6 +370,28 @@ def _observe_of(argv):
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+def stdin_text():
+    """Whatever is *already* on stdin — never blocks.
+
+    The client may hand the fake an inherited stdin (no ``input=`` given),
+    and a blocking read there would hang the engine instead of answering.
+    A terminal is never read from; a pipe is read only when data is
+    waiting.
+    """
+    stream = sys.stdin
+    if stream is None:
+        return ""
+    try:
+        if stream.isatty():
+            return ""
+        ready, _, _ = select.select([stream], [], [], 0.05)
+        if not ready:
+            return ""
+        return stream.read()
+    except (OSError, ValueError):
+        return ""
+
+
 def cli_main(cmd, argv):
     """The one-shot command line of the fake engine."""
     if MODE in ("silent", "timeout"):
@@ -383,7 +406,7 @@ def cli_main(cmd, argv):
 
     if cmd == "echo-argv":
         # A probe subcommand: it reports exactly what the client passed.
-        print(json.dumps({"cmd": cmd, "args": argv, "stdin": sys.stdin.read()}))
+        print(json.dumps({"cmd": cmd, "args": argv, "stdin": stdin_text()}))
         return 0
 
     path = positional(argv)

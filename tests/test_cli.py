@@ -8,6 +8,10 @@ the client passed on the command line).
 from __future__ import annotations
 
 import json
+import os
+import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -24,6 +28,8 @@ from esml import (
     run_cli,
     version,
 )
+
+FAKE = pathlib.Path(__file__).with_name("fake_esml.py")
 
 GOOD_DOC = """<?xml version="1.0"?>
 <esml xmlns="https://www.ai4energy.cn/esml/v1" name="Decay">
@@ -110,6 +116,25 @@ def test_run_cli_reports_the_binary_it_ran(fake_bin):
     res = run_cli(["echo-argv"], binary=fake_bin)
     assert res.args[0] == fake_bin
     assert res.args[1] == "echo-argv"
+
+
+def test_the_fake_engine_never_blocks_on_an_inherited_stdin(tmp_path):
+    # The client hands the engine its own stdin when no `input=` is given;
+    # the fake must answer instead of waiting for a line that never comes.
+    read_fd, write_fd = os.pipe()
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(FAKE), "echo-argv"],
+            stdin=read_fd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout)["stdin"] == ""
 
 
 # ── the front validators ─────────────────────────────────────────────────
