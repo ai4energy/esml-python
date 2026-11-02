@@ -27,6 +27,16 @@ class EsmlError(Exception):
         #: SHA-256 of the source document (one-shot errors), if available.
         self.doc_hash = doc_hash
 
+    @property
+    def kind(self) -> str | None:
+        """The machine-readable error kind — an alias of :attr:`code`.
+
+        ``code`` is the name used by the ``esml.error/v1`` envelope;
+        ``kind`` is the same value under the name the client's own errors
+        use (e.g. ``academic_limit``).
+        """
+        return self.code
+
 
 class EsmlBinaryNotFound(EsmlError):
     """The `esml` engine binary could not be located."""

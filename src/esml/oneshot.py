@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
 from .binary import find_binary
+from .cli import enforce_academic_limit
 from .errors import EsmlError, EsmlProtocolError, EsmlTimeout
 
 
@@ -57,6 +58,10 @@ def solve(
     args = _base_args("solve", path, system, libraries, binary)
     args.append("--json")
     env = _run(args, "esml.solve/v1", timeout, "solve")
+    # The academic edition stops at 16,384 unknowns.  The engine refuses
+    # such a model itself; this makes the refusal legible on the client
+    # side as well (see `esml.cli.MAX_UNKNOWNS`).
+    enforce_academic_limit(env.get("unknowns"), op="solve", raw=env)
     rows = env.get("values", [])
     values = {str(row["path"]): float(row["value"]) for row in rows}
     units = {

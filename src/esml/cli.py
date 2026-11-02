@@ -30,7 +30,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from .binary import engine_version, find_binary
 from .errors import EsmlError, EsmlProtocolError, EsmlTimeout
@@ -41,8 +41,43 @@ MAX_UNKNOWNS = 16_384
 
 #: Message used whenever the client has to refuse an oversized model.
 ACADEMIC_LIMIT_MESSAGE = (
-    "学术版上限 16384，商业版请用商业二进制/客户端"
+    f"学术版上限 {MAX_UNKNOWNS}，商业版请用商业二进制/客户端"
 )
+
+
+def enforce_academic_limit(
+    unknowns: Any,
+    *,
+    op: Optional[str] = None,
+    raw: Optional[dict] = None,
+) -> None:
+    """Refuse a model that exceeds the academic edition's unknown limit.
+
+    The academic engine is the one that enforces this limit (it refuses to
+    flatten the model); the client only makes the refusal *legible* — it
+    says which limit was hit and which edition lifts it, instead of
+    letting a backend error surface as an opaque failure.
+
+    Only envelopes that carry a total unknown count can be checked here.
+    ``esml tasks`` and ``esml simulate`` do not report one, so those paths
+    rely on the academic engine to refuse the model at flatten/solve time.
+
+    Raises
+    ------
+    EsmlError
+        With ``code`` (and ``kind``) ``academic_limit``.
+    """
+    if isinstance(unknowns, bool) or not isinstance(unknowns, int):
+        return
+    if unknowns <= MAX_UNKNOWNS:
+        return
+    raise EsmlError(
+        f"该模型有 {unknowns} 个未知量，超过{MAX_UNKNOWNS}的未知量上限："
+        f"{ACADEMIC_LIMIT_MESSAGE}",
+        op=op,
+        code="academic_limit",
+        raw=raw,
+    )
 
 
 @dataclass

@@ -35,11 +35,22 @@ import time
 
 API = "esml.session/v1"
 TASKS_API = "esml.tasks/v1"
+SOLVE_API = "esml.solve/v1"
+SIMULATE_API = "esml.simulate/v1"
 DOC_HASH = 42
 MODE = os.environ.get("FAKE_ESML_MODE", "ok")
 
 #: One-shot subcommands the fake answers.
-CLI_COMMANDS = ("check", "check-units", "tasks", "inspect", "dump", "echo-argv")
+CLI_COMMANDS = (
+    "check",
+    "check-units",
+    "tasks",
+    "inspect",
+    "dump",
+    "echo-argv",
+    "solve",
+    "simulate",
+)
 
 #: Flags that consume the following token.
 _VALUE_FLAGS = (
@@ -258,6 +269,106 @@ def dump_text(text):
     return "\n".join(lines) + "\n"
 
 
+def model_param(text, name, default):
+    """A parameter's default value from the document (best effort)."""
+    match = re.search(
+        r'<parameter\b[^>]*\bname="%s"[^>]*>' % re.escape(name), text
+    )
+    if not match:
+        return default
+    try:
+        return float(attributes(match.group(0)).get("default", default))
+    except ValueError:
+        return default
+
+
+def unknowns_of():
+    """The total unknown count the fake reports (the academic-limit knob)."""
+    try:
+        return int(os.environ.get("FAKE_ESML_UNKNOWNS", "2"))
+    except ValueError:
+        return 2
+
+
+def solve_envelope(text):
+    """The `esml solve --json` envelope of one document."""
+    lam = model_param(text, "lam", 0.5)
+    x = 1.0 / (1.0 + lam)
+    return {
+        "apiVersion": SOLVE_API,
+        "system": "S",
+        "unknowns": unknowns_of(),
+        "values": [
+            {"path": "m.x", "value": x, "unit": None},
+            {"path": "m.y", "value": lam * x, "unit": None},
+        ],
+        "units": {},
+        "meta": {
+            "engineVersion": "9.9.9-fake",
+            "docHash": str(DOC_HASH),
+            "converged": True,
+            "iterations": 3,
+        },
+    }
+
+
+def simulate_envelope(text, tspan, steps, observe):
+    """The `esml simulate --json` envelope of one document."""
+    lam = model_param(text, "lam", 0.5)
+    t0, t1 = tspan
+    columns = list(observe) if observe else ["m.x", "m.y"]
+    times = [t0 + (t1 - t0) * i / steps for i in range(steps + 1)]
+    rows = []
+    for t in times:
+        x = math.exp(-lam * (t - t0))
+        rows.append([x, lam * x])
+    if not observe:
+        rows = [row[: len(columns)] for row in rows]
+    return {
+        "apiVersion": SIMULATE_API,
+        "system": "S",
+        "steps": steps,
+        "t": times,
+        "columns": columns,
+        "rows": rows,
+        "units": {},
+        "meta": {
+            "engineVersion": "9.9.9-fake",
+            "docHash": str(DOC_HASH),
+        },
+    }
+
+
+def _flag(argv, name, default=None):
+    """The value of a flag (``--flag value``), or the default."""
+    if name in argv:
+        index = argv.index(name)
+        if index + 1 < len(argv):
+            return argv[index + 1]
+    return default
+
+
+def _tspan_of(argv):
+    raw = _flag(argv, "--tspan", "0,1")
+    left, _, right = raw.partition(",")
+    return float(left), float(right)
+
+
+def _int_flag(argv, name, default):
+    raw = _flag(argv, name)
+    try:
+        return int(raw) if raw is not None else default
+    except ValueError:
+        return default
+
+
+def _observe_of(argv):
+    raw = _flag(argv, "--observe")
+    if not raw:
+        return None
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
 def cli_main(cmd, argv):
     """The one-shot command line of the fake engine."""
     if MODE in ("silent", "timeout"):
@@ -331,6 +442,15 @@ def cli_main(cmd, argv):
         return 0
     elif cmd == "dump":
         print(dump_text(text), end="")
+        return 0
+    elif cmd == "solve":
+        print(json.dumps(solve_envelope(text), indent=2, sort_keys=True))
+        return 0
+    elif cmd == "simulate":
+        envelope_out = simulate_envelope(
+            text, _tspan_of(argv), _int_flag(argv, "--steps", 100), _observe_of(argv)
+        )
+        print(json.dumps(envelope_out, indent=2, sort_keys=True))
         return 0
     else:  # pragma: no cover — the caller filters the command set
         print("fake esml: unknown subcommand `{}`".format(cmd), file=sys.stderr)
