@@ -1,14 +1,31 @@
 """ESML: MIT Python client for the ESML engine.
 
 The engine (``esml``) is a commercial binary distributed separately; this
-package only runs its public command line / JSON protocol. The public surface
-is one-shot: :func:`solve` and :func:`simulate` start one engine process per
-call and keep no state. :class:`Session` (resident DTIL sessions) requires the
-commercial engine edition.
+package only runs its public command line / JSON protocol.
+
+The public surface is the **whole command line**:
+
+* :func:`solve` / :func:`simulate` — one-shot solving (one engine process
+  per call, no state kept between calls);
+* :func:`check` / :func:`check_units` — the front validators;
+* :func:`tasks` — the compute-task runner;
+* :func:`inspect` / :func:`dump` — the structural report and the flattened
+  listing;
+* :func:`run_cli` — an unrestricted escape hatch for any subcommand.
+
+The client does **not** restrict which subcommand may be called: whether the
+installed edition supports it is the engine's decision.  The academic
+edition's only limit is the unknown count (:data:`MAX_UNKNOWNS`).
+
+:class:`Session` (resident DTIL sessions) requires the commercial engine
+edition.
 
 Quick start::
 
-    from esml import simulate, solve
+    from esml import check, simulate, solve
+
+    reports = check("plant.esml")
+    print(reports[0]["summary"])
 
     steady = solve("plant.esml", system="Plant")
     print(steady.values)
@@ -41,7 +58,7 @@ from .oneshot import SimulateOutput, SolveOutput, simulate, solve
 from .session import Info, Session, SolveResult, Trajectory
 from .tasks import TaskResult, TasksOutput, tasks
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Session",
