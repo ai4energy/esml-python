@@ -30,6 +30,7 @@ from .errors import (
 )
 from .oneshot import SimulateOutput, SolveOutput, simulate, solve
 from .session import Info, Session, SolveResult, Trajectory
+from .tasks import TaskResult, TasksOutput, tasks
 
 __version__ = "0.1.0"
 
@@ -46,6 +47,9 @@ __all__ = [
     "run_cli",
     "check",
     "check_units",
+    "tasks",
+    "TaskResult",
+    "TasksOutput",
     "EsmlError",
     "EsmlBinaryNotFound",
     "EsmlProtocolError",
