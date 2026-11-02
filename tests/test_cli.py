@@ -12,7 +12,18 @@ import json
 import pytest
 
 import esml.cli as cli_module
-from esml import CLIResult, EsmlError, EsmlProtocolError, EsmlTimeout, check, check_units, run_cli
+from esml import (
+    CLIResult,
+    EsmlError,
+    EsmlProtocolError,
+    EsmlTimeout,
+    check,
+    check_units,
+    dump,
+    inspect,
+    run_cli,
+    version,
+)
 
 GOOD_DOC = """<?xml version="1.0"?>
 <esml xmlns="https://www.ai4energy.cn/esml/v1" name="Decay">
@@ -179,3 +190,56 @@ def test_check_passes_the_library_roots_to_the_engine(fake_bin, good_doc, monkey
     monkeypatch.setattr(cli_module, "run_cli", spy)
     check(good_doc, libraries=["/tmp/libroot"], binary=fake_bin)
     assert seen["args"] == ["check", good_doc, "--json", "-L", "/tmp/libroot"]
+
+
+# ── the structural report, the dump and the version ─────────────────────
+
+
+def test_inspect_returns_the_report_text(fake_bin, good_doc):
+    text = inspect(good_doc, binary=fake_bin)
+    assert "system   : S" in text
+    assert "unknowns" in text
+
+
+def test_dump_returns_the_flattened_listing(fake_bin, good_doc):
+    text = dump(good_doc, binary=fake_bin)
+    assert "system : S" in text
+    assert "x = 1.0" in text
+
+
+def test_inspect_raises_on_a_non_zero_exit(fake_bin, good_doc, monkeypatch):
+    monkeypatch.setenv("FAKE_ESML_MODE", "error")
+    with pytest.raises(EsmlError) as exc:
+        inspect(good_doc, binary=fake_bin)
+    assert exc.value.op == "inspect"
+    assert "fake engine failure" in str(exc.value)
+
+
+def test_dump_raises_on_a_non_zero_exit(fake_bin, good_doc, monkeypatch):
+    monkeypatch.setenv("FAKE_ESML_MODE", "error")
+    with pytest.raises(EsmlError) as exc:
+        dump(good_doc, binary=fake_bin)
+    assert exc.value.op == "dump"
+
+
+def test_inspect_and_dump_pass_the_system_and_the_library_roots(
+    fake_bin, good_doc, monkeypatch
+):
+    seen = []
+    real_run_cli = cli_module.run_cli
+
+    def spy(args, **kwargs):
+        seen.append(list(args))
+        return real_run_cli(args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "run_cli", spy)
+    inspect(good_doc, system="S", libraries=["/tmp/libroot"], binary=fake_bin)
+    dump(good_doc, system="S", libraries=["/tmp/libroot"], binary=fake_bin)
+    assert seen == [
+        ["inspect", good_doc, "--system", "S", "-L", "/tmp/libroot"],
+        ["dump", good_doc, "--system", "S", "-L", "/tmp/libroot"],
+    ]
+
+
+def test_version_reads_the_engine_version(fake_bin):
+    assert version(binary=fake_bin) == "9.9.9-fake"

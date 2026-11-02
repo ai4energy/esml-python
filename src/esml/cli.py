@@ -32,7 +32,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
-from .binary import find_binary
+from .binary import engine_version, find_binary
 from .errors import EsmlError, EsmlProtocolError, EsmlTimeout
 
 #: The academic edition's hard limit: the engine refuses to flatten a model
@@ -176,7 +176,90 @@ def check_units(
     )
 
 
+def inspect(
+    path: str | os.PathLike,
+    *,
+    system: Optional[str] = None,
+    libraries: Sequence[str | os.PathLike] = (),
+    binary: Optional[str | os.PathLike] = None,
+    timeout: float = 120.0,
+) -> str:
+    """Return the engine's structural report for a document (text).
+
+    Runs ``esml inspect`` and returns stdout verbatim — the report is a
+    human-readable table (system → unknowns → well-posedness), so the
+    client hands it over unparsed.  A non-zero exit raises
+    :class:`EsmlError`.
+    """
+    return _text(
+        "inspect", path, system=system, libraries=libraries, binary=binary, timeout=timeout
+    )
+
+
+def dump(
+    path: str | os.PathLike,
+    *,
+    system: Optional[str] = None,
+    libraries: Sequence[str | os.PathLike] = (),
+    binary: Optional[str | os.PathLike] = None,
+    timeout: float = 120.0,
+) -> str:
+    """Return the flattened model of a document (text).
+
+    Runs ``esml dump`` and returns stdout verbatim — the dump is the
+    engine's flattened variable / equation listing.  A non-zero exit
+    raises :class:`EsmlError`.
+    """
+    return _text(
+        "dump", path, system=system, libraries=libraries, binary=binary, timeout=timeout
+    )
+
+
+def version(binary: Optional[str | os.PathLike] = None) -> Optional[str]:
+    """The engine version string (e.g. ``1.9.0``), or ``None``.
+
+    Thin wrapper over :func:`esml.binary.engine_version`; the version is
+    informational — protocol compatibility is decided by the envelope's
+    ``apiVersion``, not by this string.
+    """
+    return engine_version(find_binary(binary))
+
+
 # ── internals ────────────────────────────────────────────────────────────
+
+
+def _text(
+    op: str,
+    path: str | os.PathLike,
+    *,
+    system: Optional[str],
+    libraries: Sequence[str | os.PathLike],
+    binary: Optional[str | os.PathLike],
+    timeout: float,
+) -> str:
+    argv = [op, os.fspath(path)]
+    if system:
+        argv += ["--system", str(system)]
+    for lib in libraries:
+        argv += ["-L", os.fspath(lib)]
+    res = run_cli(argv, binary=binary, timeout=timeout)
+    if res.code != 0:
+        raise EsmlError(
+            _failure_message(op, res),
+            op=op,
+            code=f"{op}.failed",
+            raw={"code": res.code, "stdout": res.stdout, "stderr": res.stderr},
+        )
+    return res.stdout
+
+
+def _failure_message(op: str, res: CLIResult) -> str:
+    message = (res.stderr or res.stdout or "").strip()
+    if message.startswith("error: "):
+        message = message[len("error: "):]
+    if not message:
+        message = f"`esml {op}` exited with code {res.code}"
+    return message
 
 
 def _check_json(
