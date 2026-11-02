@@ -26,13 +26,14 @@ Example
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .binary import find_binary
-from .errors import EsmlError, EsmlTimeout
+from .errors import EsmlError, EsmlProtocolError, EsmlTimeout
 
 #: The academic edition's hard limit: the engine refuses to flatten a model
 #: with more unknowns than this.  The commercial edition has no such limit.
@@ -129,3 +130,121 @@ def run_cli(
         code=proc.returncode,
         args=tuple(argv),
     )
+
+
+def check(
+    path: str | os.PathLike,
+    *,
+    libraries: Sequence[str | os.PathLike] = (),
+    binary: Optional[str | os.PathLike] = None,
+    timeout: float = 120.0,
+) -> list[dict]:
+    """Front-validate a document (or a directory of documents).
+
+    Runs ``esml check --json`` and returns the engine's report array — one
+    entry per validated file, each with ``file`` / ``well_formed`` /
+    ``summary`` / ``findings``.
+
+    The call fails — :class:`EsmlError`, with the engine's stderr in the
+    message and the parsed report in ``raw["reports"]`` — when the engine
+    exits non-zero **or** reports an ``error``-severity finding.  Both
+    signals are needed: the engine's ``--json`` path does not always carry
+    the verdict in the exit code (``check-units --json`` exits 0 even when
+    it found errors), so trusting the exit code alone would let a broken
+    document pass as "checked".  Warnings alone do not fail the call.
+    """
+    return _check_json(
+        "check", path, libraries=libraries, binary=binary, timeout=timeout
+    )
+
+
+def check_units(
+    path: str | os.PathLike,
+    *,
+    libraries: Sequence[str | os.PathLike] = (),
+    binary: Optional[str | os.PathLike] = None,
+    timeout: float = 120.0,
+) -> list[dict]:
+    """Check the unit declarations of a document (or a directory).
+
+    Runs ``esml check-units --json`` and returns the engine's report array
+    (same shape as :func:`check`, with the unit-specific summary).  The
+    failure rule is the same as :func:`check`.
+    """
+    return _check_json(
+        "check-units", path, libraries=libraries, binary=binary, timeout=timeout
+    )
+
+
+# ── internals ────────────────────────────────────────────────────────────
+
+
+def _check_json(
+    op: str,
+    path: str | os.PathLike,
+    *,
+    libraries: Sequence[str | os.PathLike],
+    binary: Optional[str | os.PathLike],
+    timeout: float,
+) -> list[dict]:
+    argv = [op, os.fspath(path), "--json"]
+    for lib in libraries:
+        argv += ["-L", os.fspath(lib)]
+    res = run_cli(argv, binary=binary, timeout=timeout)
+    payload = _maybe_json(res.stdout)
+    reports = payload if isinstance(payload, list) else None
+    errors = _error_findings(reports)
+    if res.code != 0 or errors:
+        # The engine prints its report *and* fails — keep the report
+        # reachable through the exception.
+        raise EsmlError(
+            _check_message(op, res, errors),
+            op=op,
+            code=f"{op}.failed",
+            raw={
+                "code": res.code,
+                "stdout": res.stdout,
+                "stderr": res.stderr,
+                "reports": reports,
+            },
+        )
+    if not isinstance(payload, list):
+        raise EsmlProtocolError(
+            f"`esml {op} --json` did not return a JSON array: {res.stdout!r}", op=op
+        )
+    return [row for row in payload if isinstance(row, dict)]
+
+
+def _error_findings(reports) -> list:
+    """Every ``error``-severity finding in a report array."""
+    found = []
+    if not isinstance(reports, list):
+        return found
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        for finding in report.get("findings") or []:
+            if isinstance(finding, dict) and finding.get("severity") == "error":
+                found.append(finding)
+    return found
+
+
+def _check_message(op: str, res: CLIResult, errors: list) -> str:
+    """A message that says *what* the validator objected to."""
+    stderr = (res.stderr or "").strip()
+    if stderr.startswith("error: "):
+        stderr = stderr[len("error: "):]
+    if stderr:
+        return stderr
+    if errors:
+        head = "; ".join(f"{f.get('code')}: {f.get('message')}" for f in errors[:3])
+        more = "" if len(errors) <= 3 else f" (and {len(errors) - 3} more)"
+        return f"`esml {op}` reported {len(errors)} error finding(s): {head}{more}"
+    return f"`esml {op}` exited with code {res.code}"
+
+
+def _maybe_json(text: str):
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None

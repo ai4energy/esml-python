@@ -292,7 +292,11 @@ def cli_main(cmd, argv):
         code = 1 if report["summary"]["errors"] else 0
     elif cmd == "check-units":
         report = check_units_report(text, path)
-        code = 1 if report["summary"]["errors"] else 0
+        # The engine propagates the exit code only on its *human* path; in
+        # the `--json` path `check-units` always exits 0, even with errors.
+        # The fake mirrors that quirk so the client cannot lean on the exit
+        # code alone.
+        code = 0 if "--json" in argv else (1 if report["summary"]["errors"] else 0)
     elif cmd == "tasks":
         if MODE == "task-error":
             print(

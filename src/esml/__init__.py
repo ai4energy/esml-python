@@ -20,7 +20,7 @@ Quick start::
 from __future__ import annotations
 
 from .binary import engine_version, find_binary
-from .cli import CLIResult, run_cli
+from .cli import CLIResult, check, check_units, run_cli
 from .errors import (
     EsmlBinaryNotFound,
     EsmlClosed,
@@ -44,6 +44,8 @@ __all__ = [
     "SimulateOutput",
     "CLIResult",
     "run_cli",
+    "check",
+    "check_units",
     "EsmlError",
     "EsmlBinaryNotFound",
     "EsmlProtocolError",
