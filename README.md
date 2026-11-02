@@ -82,7 +82,8 @@ meta, outcome, raw}` 列表。信封必须声明 `apiVersion == "esml.tasks/v1"`
 `EsmlError.code` 需引擎 **>= 1.9.0**。旧引擎缺少的字段会表现为空的 `meta` /
 `units` 或 `None`，客户端不伪造。`check` / `check-units` 的 `--json` 面与
 `tasks` 的 `esml.tasks/v1` 面同样取决于引擎是否提供：**引擎没有这面时，客户端
-会响亮报 `EsmlProtocolError`，而不是给一个空结果**。
+会响亮报 `EsmlProtocolError`，而不是给一个空结果**。而 `esml.solve/v1` /
+`esml.simulate/v1` / `esml.session/v1` 这三张信封只有**商业引擎**给。
 
 `observe` 只接受变量路径；空列表在客户端拒绝，未知/重复路径由引擎拒绝。
 
@@ -133,3 +134,10 @@ ESML_BIN=/path/to/esml pytest -q tests/test_integration.py
 ```
 
 协议测试使用 `tests/fake_esml.py`；真机集成测试只在设置 `ESML_BIN` 时运行。
+
+> 真机集成测试要的是**商业引擎**：它验的是 `esml.solve/v1` /
+> `esml.simulate/v1` / `esml.session/v1` 这套 JSON 信封。开源（MIT）引擎只提供
+> 人读的命令行（`check` / `check-units` / `inspect` / `dump` / `tasks`），`solve`
+> 即便带 `--json` 也只吐文本错误——于是 `tests/test_integration.py` 在开源引擎上
+> 会失败，**这是预期的，不是客户端的 bug**（main 上同样失败）。用开源引擎时，
+> 能真机验的是 `check` / `check_units` / `inspect` / `dump` / `version` 这几条。
