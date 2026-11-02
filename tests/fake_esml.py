@@ -1,14 +1,27 @@
 #!/usr/bin/env python3
-"""A faithful fake of `esml session` for client tests (no engine needed).
+"""A faithful fake of the `esml` engine for client tests (no engine needed).
 
-It implements the subset of the `esml.session/v1` protocol the client uses and
-mirrors the real engine's envelope shapes and error semantics. Set
-``FAKE_ESML_MODE`` to exercise failure modes:
+It implements two surfaces:
+
+* the resident `esml session` protocol (`esml.session/v1`), and
+* the one-shot command line (`check` / `check-units` / `tasks` / `inspect` /
+  `dump` / `echo-argv`).
+
+The JSON shapes mirror the real engine: `esml check --json` emits an array of
+report objects (`file` / `well_formed` / `summary` / `findings`), and
+`esml tasks --json` emits an `esml.tasks/v1` envelope.
+
+Set ``FAKE_ESML_MODE`` to exercise failure modes:
 
 * ``bad-version`` — the open envelope claims an unknown apiVersion
 * ``crash``       — exits right after the open envelope
 * ``silent``      — reads nothing and never answers (timeout test)
 * ``garbage``     — answers each request with a non-JSON line
+* ``error``       — the one-shot CLI fails loudly (stderr + exit 1)
+* ``bad-json``    — the one-shot CLI exits 0 but prints no JSON
+* ``timeout``     — the one-shot CLI never answers (alias of ``silent``)
+* ``task-error``  — `esml tasks --json` answers `ok=false` with an error
+* ``bad-api``     — `esml tasks --json` answers the wrong apiVersion
 """
 
 from __future__ import annotations
@@ -16,12 +29,29 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 import time
 
 API = "esml.session/v1"
+TASKS_API = "esml.tasks/v1"
 DOC_HASH = 42
 MODE = os.environ.get("FAKE_ESML_MODE", "ok")
+
+#: One-shot subcommands the fake answers.
+CLI_COMMANDS = ("check", "check-units", "tasks", "inspect", "dump", "echo-argv")
+
+#: Flags that consume the following token.
+_VALUE_FLAGS = (
+    "-L",
+    "--libroot",
+    "--system",
+    "--source",
+    "--jobs",
+    "--tspan",
+    "--steps",
+    "--observe",
+)
 
 
 def envelope(**fields):
@@ -32,6 +62,284 @@ def envelope(**fields):
 
 def error(op, message):
     return envelope(op="error", request=op, error=message)
+
+
+# ── the one-shot command line ────────────────────────────────────────────
+
+
+def read_doc(path):
+    """The document text, or ``None`` when it cannot be read."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def positional(argv):
+    """The first non-flag token of ``argv`` (flag values are skipped)."""
+    skip = False
+    for tok in argv:
+        if skip:
+            skip = False
+            continue
+        if tok in _VALUE_FLAGS:
+            skip = True
+            continue
+        if tok.startswith("-"):
+            continue
+        return tok
+    return None
+
+
+def attributes(tag_text):
+    """The attributes of one XML start tag as a dict."""
+    out = {}
+    for key, value in re.findall(r'([A-Za-z_:][\w.:-]*)\s*=\s*"([^"]*)"', tag_text):
+        out[key] = value
+    return out
+
+
+def check_report(text, path):
+    """The `esml check --json` report of one document."""
+    well_formed = "</esml>" in text
+    findings = []
+    errors = 0
+    if not well_formed:
+        errors = 1
+        findings.append(
+            {
+                "severity": "error",
+                "code": "XML",
+                "location": "document",
+                "message": "XML well-formedness failed",
+                "advice": "close every element that is opened",
+                "count": 1,
+            }
+        )
+    return {
+        "file": path,
+        "well_formed": well_formed,
+        "summary": {
+            "errors": errors,
+            "warnings": 0,
+            "models": len(re.findall(r"<modelType\b", text)),
+            "systems": len(re.findall(r"<system\b", text)),
+            "types": len(re.findall(r"<type\b", text)),
+            "port_types": 0,
+            "units": len(re.findall(r"<units\b", text)),
+            "functions": 0,
+            "use_libraries": [],
+            "five_level_ok": well_formed,
+            "connect_rules_total": 0,
+        },
+        "findings": findings,
+    }
+
+
+def check_units_report(text, path):
+    """The `esml check-units --json` report of one document."""
+    well_formed = "</esml>" in text
+    findings = []
+    errors = 0
+    if not well_formed:
+        errors = 1
+        findings.append(
+            {
+                "severity": "error",
+                "code": "XML",
+                "location": "document",
+                "message": "XML well-formedness failed",
+                "advice": "close every element that is opened",
+            }
+        )
+    return {
+        "file": path,
+        "well_formed": well_formed,
+        "summary": {
+            "errors": errors,
+            "warnings": 0,
+            "unit_block_rows": len(re.findall(r"<units\b", text)),
+            "type_unit_decls": len(re.findall(r"<type\b", text)),
+            "invalid_type_units": 0,
+            "unknown_anchors": 0,
+            "dimension_mismatches": 0,
+        },
+        "findings": findings,
+    }
+
+
+def render_report(report):
+    """The human-readable form of one report (the `--json`-less output)."""
+    lines = ["=== {}".format(report["file"])]
+    if not report["well_formed"]:
+        lines.append("    (XML well-formedness failed; engine-level checks skipped)")
+    if not report["findings"]:
+        lines.append("    ok")
+    for finding in report["findings"]:
+        lines.append(
+            "    {} {}: {} ({})".format(
+                finding["severity"],
+                finding["code"],
+                finding["message"],
+                finding["location"],
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def tasks_envelope(text, path):
+    """The `esml tasks --json` envelope of one document."""
+    target = None
+    for tag in re.findall(r"<computeTasks\b[^>]*>", text):
+        target = attributes(tag).get("target", target)
+    rows = []
+    for tag in re.findall(r"<task\b[^>]*>", text):
+        attrs = attributes(tag)
+        name = attrs.get("name")
+        if not name:
+            continue
+        kind = attrs.get("kind", "simulate")
+        rows.append(
+            {
+                "name": name,
+                "kind": kind,
+                "target": target,
+                "units": {},
+                "meta": {"engineVersion": "9.9.9-fake", "docHash": DOC_HASH},
+                "outcome": {"kind": kind, "status": "ok"},
+            }
+        )
+    if not rows:
+        return {
+            "apiVersion": TASKS_API,
+            "ok": False,
+            "error": {
+                "code": "tasks.empty",
+                "message": "no matching task in {}".format(path),
+            },
+        }
+    return {"apiVersion": TASKS_API, "ok": True, "system": target, "tasks": rows}
+
+
+def inspect_text(text):
+    """The `esml inspect` report (human text)."""
+    systems = re.findall(r"<system\b[^>]*>", text)
+    name = attributes(systems[0]).get("name", "?") if systems else "?"
+    variables = len(re.findall(r"<variable\b", text))
+    params = len(re.findall(r"<parameter\b", text))
+    equations = len(re.findall(r"<equation\b", text))
+    return (
+        "document : {name} ({models} models)\n"
+        "system   : {system} → {unknowns} unknowns, {equations} equations, "
+        "{params} params\n"
+    ).format(
+        name=attributes(re.findall(r"<esml\b[^>]*>", text)[0]).get("name", "?"),
+        models=len(re.findall(r"<modelType\b", text)),
+        system=name,
+        unknowns=variables,
+        equations=equations,
+        params=params,
+    )
+
+
+def dump_text(text):
+    """The `esml dump` listing (human text)."""
+    systems = re.findall(r"<system\b[^>]*>", text)
+    name = attributes(systems[0]).get("name", "?") if systems else "?"
+    lines = ["system : {}".format(name)]
+    for tag in re.findall(r"<variable\b[^>]*>", text):
+        attrs = attributes(tag)
+        lines.append(
+            "  {name} = {initial}".format(
+                name=attrs.get("name", "?"), initial=attrs.get("initial", "0")
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def cli_main(cmd, argv):
+    """The one-shot command line of the fake engine."""
+    if MODE in ("silent", "timeout"):
+        time.sleep(3600)
+        return 0
+    if MODE == "error":
+        print("error: fake engine failure (mode=error)", file=sys.stderr)
+        return 1
+    if MODE == "bad-json":
+        print("this is not a json document")
+        return 0
+
+    if cmd == "echo-argv":
+        # A probe subcommand: it reports exactly what the client passed.
+        print(json.dumps({"cmd": cmd, "args": argv, "stdin": sys.stdin.read()}))
+        return 0
+
+    path = positional(argv)
+    if path is None:
+        print("error: `{}` requires <file|dir>".format(cmd), file=sys.stderr)
+        return 2
+    text = read_doc(path)
+    if text is None:
+        print(
+            "error: read {}: No such file or directory (os error 2)".format(path),
+            file=sys.stderr,
+        )
+        return 1
+
+    if cmd == "check":
+        report = check_report(text, path)
+        code = 1 if report["summary"]["errors"] else 0
+    elif cmd == "check-units":
+        report = check_units_report(text, path)
+        code = 1 if report["summary"]["errors"] else 0
+    elif cmd == "tasks":
+        if MODE == "task-error":
+            print(
+                json.dumps(
+                    {
+                        "apiVersion": TASKS_API,
+                        "ok": False,
+                        "error": {
+                            "code": "task.failed",
+                            "message": "task `sim1` failed",
+                        },
+                    }
+                )
+            )
+            return 0
+        if MODE == "bad-api":
+            print(json.dumps({"apiVersion": "esml.tasks/v0", "ok": True, "tasks": []}))
+            return 0
+        envelope_out = tasks_envelope(text, path)
+        if "--json" in argv:
+            print(json.dumps(envelope_out, indent=2, sort_keys=True))
+        else:
+            for row in envelope_out.get("tasks", []):
+                print(
+                    "task {name} ({kind}) [{target}]: {kind}".format(
+                        name=row["name"], kind=row["kind"], target=row["target"]
+                    )
+                )
+        return 0
+    elif cmd == "inspect":
+        print(inspect_text(text), end="")
+        return 0
+    elif cmd == "dump":
+        print(dump_text(text), end="")
+        return 0
+    else:  # pragma: no cover — the caller filters the command set
+        print("fake esml: unknown subcommand `{}`".format(cmd), file=sys.stderr)
+        return 2
+
+    if "--json" in argv:
+        print(json.dumps([report], indent=2, sort_keys=True))
+    else:
+        print(render_report(report), end="")
+    return code
+
+
+# ── the resident session protocol ─────────────────────────────────────────
 
 
 class Fake:
@@ -130,7 +438,7 @@ def observe_of(req):
         return None, None
     arr = req["observe"]
     if not isinstance(arr, list) or not arr:
-        return None, 'observing needs a non-empty array'
+        return None, "observing needs a non-empty array"
     if any(not isinstance(p, str) for p in arr):
         return None, "each observe path must be a string"
     return arr, None
@@ -215,7 +523,7 @@ def handle(sess, req):
     if op == "restore":
         snap = req.get("snapshot")
         if not isinstance(snap, dict):
-            return error(op, 'restore requires "snapshot" (object)')
+            return error(op, "restore requires \"snapshot\" (object)")
         if snap.get("docHash") != DOC_HASH:
             return error(op, "snapshot was taken from a different document")
         params = {}
@@ -290,13 +598,8 @@ def handle(sess, req):
     )
 
 
-def main(argv):
-    if "--version" in argv:
-        print("ESML v9.9.9-fake · fake engine for client tests")
-        return 0
-    if len(argv) < 2 or argv[0] != "session":
-        print("fake esml: expected `session <file>`", file=sys.stderr)
-        return 2
+def session_main(argv):
+    """The resident `esml session <file>` protocol."""
     sess = Fake()
     version = "esml.session/v0" if MODE == "bad-version" else API
     print(
@@ -337,6 +640,22 @@ def main(argv):
         if out.get("op") == "close":
             return 0
     return 0
+
+
+def main(argv):
+    if "--version" in argv:
+        print("ESML v9.9.9-fake · fake engine for client tests")
+        return 0
+    if not argv:
+        print("fake esml: expected a subcommand", file=sys.stderr)
+        return 2
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "session":
+        return session_main(rest)
+    if cmd in CLI_COMMANDS:
+        return cli_main(cmd, rest)
+    print(f"fake esml: unknown subcommand `{cmd}`", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
